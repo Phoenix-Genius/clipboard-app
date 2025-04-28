@@ -1,22 +1,360 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
-    />
-    <meta
-      http-equiv="X-Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
-    />
-    <title>Hello from Electron renderer!</title>
-  </head>
-  <body>
-    <h1>Hello from Electron renderer!</h1>
-    <p>👋</p>
-    <button id="alertBtn">Click Me</button>
-    <p id="info"></p>
-    <script src="./renderer.js"></script>
-  </body>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Clipboard Cards with Modal Add</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Tooltip */
+    .tooltip {
+      position: absolute;
+      background-color: #333;
+      color: #fff;
+      padding: 5px 8px;
+      font-size: 14px;
+      border-radius: 4px;
+      white-space: normal;
+      max-width: 300px;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      margin-top: 5px;
+      z-index: 10;
+      display: none;
+      overflow: visible;
+      word-break: break-word;
+    }
+
+    .row-container:hover .tooltip {
+      display: block;
+    }
+
+    /* Context Menu */
+    #contextMenu {
+      position: absolute;
+      z-index: 50;
+      display: none;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      padding: 8px 0;
+      min-width: 120px;
+    }
+
+    #contextMenu button {
+      width: 100%;
+      text-left;
+      padding: 8px 12px;
+      font-size: 14px;
+      color: #333;
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+
+    #contextMenu button:hover {
+      background-color: #f3f4f6;
+    }
+
+    /* Dustbin */
+    #dustbin {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      z-index: 40;
+    }
+
+    /* Modal */
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+    }
+
+    .modal-content {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      width: 300px;
+      text-align: center;
+    }
+  </style>
+</head>
+
+<body class="bg-gradient-to-r from-blue-100 to-purple-100 min-h-screen p-6 relative">
+
+  <!-- Top Center Toast -->
+  <div id="toast"
+    class="fixed top-5 left-1/2 transform -translate-x-1/2 hidden bg-green-500 text-white px-6 py-3 rounded shadow-lg text-center z-50">
+  </div>
+
+  <!-- Context Menu -->
+  <div id="contextMenu">
+    <button onclick="contextCopy()">📋 Copy</button>
+    <button onclick="contextEdit()">✏️ Edit</button>
+    <button onclick="contextDelete()">🗑️ Delete</button>
+  </div>
+
+  <!-- Dustbin Icon -->
+  <div id="dustbin" class="text-5xl text-red-500">🗑️</div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal">
+    <div class="modal-content">
+      <h2 class="text-xl font-bold mb-4">Add New Item</h2>
+      <input type="text" id="modalDesc" placeholder="Description" class="border rounded p-2 mb-3 w-full">
+      <input type="text" id="modalText" placeholder="Copy Text" class="border rounded p-2 mb-3 w-full">
+      <div class="flex justify-center space-x-4">
+        <button onclick="saveModal()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Save</button>
+        <button onclick="closeModal()"
+          class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-3xl font-bold text-gray-700">Clipboard Cards</h1>
+    <button onclick="openModal()"
+      class="bg-blue-500 text-white text-2xl rounded-full w-10 h-10 flex items-center justify-center hover:bg-blue-600">+</button>
+  </div>
+
+  <!-- Cards -->
+  <div id="list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6"></div>
+
+  <script>
+    const STORAGE_KEY = 'clipboard_items';
+    let items = [];
+    let currentIndex = null;
+    let draggedIndex = null;
+
+    const listDiv = document.getElementById('list');
+    const toastDiv = document.getElementById('toast');
+    const contextMenu = document.getElementById('contextMenu');
+    const dustbin = document.getElementById('dustbin');
+    const modal = document.getElementById('modal');
+    const modalDesc = document.getElementById('modalDesc');
+    const modalText = document.getElementById('modalText');
+
+    function loadFromStorage() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        items = JSON.parse(saved);
+      } else {
+        items = [
+          { desc: "First Item", text: "one" },
+          { desc: "Second Item", text: "two" },
+          { desc: "Third Item", text: "three" }
+        ];
+        saveToStorage();
+      }
+    }
+
+    function saveToStorage() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    }
+
+    function renderList() {
+      listDiv.innerHTML = '';
+      items.forEach((item, index) => {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'relative row-container flex flex-col items-center justify-center p-6 bg-white rounded-lg shadow-md cursor-pointer hover:bg-purple-50 transition';
+        itemDiv.setAttribute('draggable', true);
+        itemDiv.dataset.index = index; // ← important to track
+
+        itemDiv.oncontextmenu = (e) => {
+          e.preventDefault();
+          openContextMenu(e.pageX, e.pageY, index);
+        };
+
+        itemDiv.ondblclick = () => {
+          startEdit(index);
+        };
+
+        itemDiv.onclick = (e) => {
+          hideContextMenu();
+          if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+            copyText(index);
+          }
+        };
+
+        itemDiv.ondragstart = (e) => {
+          draggedIndex = index;
+          dustbin.style.display = 'block';
+        };
+
+        itemDiv.ondragover = (e) => {
+          e.preventDefault();
+          itemDiv.classList.add('bg-blue-100'); // visual feedback
+        };
+
+        itemDiv.ondragleave = (e) => {
+          itemDiv.classList.remove('bg-blue-100');
+        };
+
+        itemDiv.ondrop = (e) => {
+          e.preventDefault();
+          const targetIndex = Number(itemDiv.dataset.index);
+          reorderItems(draggedIndex, targetIndex);
+          draggedIndex = null;
+          dustbin.style.display = 'none';
+        };
+
+        itemDiv.ondragend = (e) => {
+          document.querySelectorAll('.row-container').forEach(div => div.classList.remove('bg-blue-100'));
+          setTimeout(() => { dustbin.style.display = 'none'; }, 100);
+        };
+
+        itemDiv.innerHTML = `
+      <div class="view-mode flex flex-col items-center">
+        <div class="text-center text-gray-700 font-semibold">${item.desc}</div>
+        <div class="tooltip">${item.text}</div>
+      </div>
+      <div class="edit-mode hidden flex flex-col items-center space-y-2">
+        <input type="text" value="${item.desc}" class="desc-input border rounded p-1 w-40 text-center">
+        <input type="text" value="${item.text}" class="text-input border rounded p-1 w-40 text-center">
+        <button onclick="saveEdit(${index})" class="mt-2 bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600">Save</button>
+      </div>
+    `;
+        listDiv.appendChild(itemDiv);
+      });
+    }
+    function reorderItems(fromIndex, toIndex) {
+      if (fromIndex === toIndex) return;
+      const movedItem = items.splice(fromIndex, 1)[0];
+      items.splice(toIndex, 0, movedItem);
+      saveToStorage();
+      renderList();
+    }
+
+
+    function openContextMenu(x, y, index) {
+      currentIndex = index;
+      contextMenu.style.left = x + 'px';
+      contextMenu.style.top = y + 'px';
+      contextMenu.style.display = 'block';
+    }
+
+    function hideContextMenu() {
+      contextMenu.style.display = 'none';
+    }
+
+    function contextCopy() {
+      if (currentIndex !== null) {
+        copyText(currentIndex);
+        hideContextMenu();
+      }
+    }
+
+    function contextEdit() {
+      if (currentIndex !== null) {
+        startEdit(currentIndex);
+        hideContextMenu();
+      }
+    }
+
+    function contextDelete() {
+      if (currentIndex !== null) {
+        deleteItem(currentIndex);
+        hideContextMenu();
+      }
+    }
+
+    function showToast(message) {
+      toastDiv.textContent = message;
+      toastDiv.classList.remove('hidden');
+      setTimeout(() => {
+        toastDiv.classList.add('hidden');
+      }, 2000);
+    }
+
+    function copyText(index) {
+      navigator.clipboard.writeText(items[index].text)
+        .then(() => showToast(`Copied: "${items[index].text}"`))
+        .catch(err => console.error('Copy failed:', err));
+    }
+
+    function startEdit(index) {
+      const card = listDiv.children[index];
+      card.querySelector('.view-mode').classList.add('hidden');
+      card.querySelector('.edit-mode').classList.remove('hidden');
+    }
+
+    function saveEdit(index) {
+      const card = listDiv.children[index];
+      const newDesc = card.querySelector('.desc-input').value.trim();
+      const newText = card.querySelector('.text-input').value.trim();
+      if (newDesc && newText) {
+        items[index] = { desc: newDesc, text: newText };
+        saveToStorage();
+        renderList();
+      }
+    }
+
+    function deleteItem(index) {
+      if (confirm(`Are you sure you want to delete "${items[index].desc}"?`)) {
+        items.splice(index, 1);
+        saveToStorage();
+        renderList();
+      }
+    }
+
+    function openModal() {
+      modalDesc.value = '';
+      modalText.value = '';
+      modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+      modal.style.display = 'none';
+    }
+
+    function saveModal() {
+      const desc = modalDesc.value.trim();
+      const text = modalText.value.trim();
+      if (desc && text) {
+        items.push({ desc, text });
+        saveToStorage();
+        renderList();
+        closeModal();
+      }
+    }
+
+    // Dustbin drop behavior
+    dustbin.ondragover = (e) => {
+      e.preventDefault();
+    };
+
+    dustbin.ondrop = (e) => {
+      if (draggedIndex !== null) {
+        deleteItem(draggedIndex);
+        draggedIndex = null;
+        dustbin.style.display = 'none';
+      }
+    };
+
+    window.onclick = function (e) {
+      if (!contextMenu.contains(e.target) && !modal.contains(e.target)) {
+        hideContextMenu();
+      }
+    }
+
+    // Initialize
+    loadFromStorage();
+    renderList();
+  </script>
+
+</body>
+
 </html>

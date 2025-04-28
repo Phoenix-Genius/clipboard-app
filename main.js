@@ -1,26 +1,47 @@
-const { app, BrowserWindow } = require('electron/main')
+const { app, BrowserWindow, Tray, Menu } = require('electron');
+const path = require('path');
 
-const createWindow = () => {
-  const win = new BrowserWindow({
-    width: 800,
-    height: 600
-  })
-
-  win.loadFile('index.html')
-}
+let tray = null;
+let win = null;
 
 app.whenReady().then(() => {
-  createWindow()
+  win = new BrowserWindow({
+    width: 800,
+    height: 600,
+    show: false,           // start hidden
+    frame: false,          // no window frame
+    resizable: false,
+    icon: path.join(__dirname, 'icon.png'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+    },
+  });
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
-  })
-})
+  win.loadFile('index.html');
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
+  tray = new Tray(path.join(__dirname, 'icon.png'));
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Show/Hide', click: toggleWindow },
+    { label: 'Quit', click: () => app.quit() }
+  ]);
+
+  tray.setToolTip('Clipboard Tray App');
+  tray.setContextMenu(contextMenu);
+
+  tray.on('click', toggleWindow);
+});
+
+function toggleWindow() {
+  if (win.isVisible()) {
+    win.hide();
+  } else {
+    win.show();
+    win.focus();
   }
-})
+}
+
+app.on('window-all-closed', (e) => {
+  e.preventDefault(); // prevent app from closing
+});
